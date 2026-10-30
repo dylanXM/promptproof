@@ -1,0 +1,66 @@
+# PromptProof example suite — a retrieval-augmented answer checker.
+#
+# Demonstrates purely deterministic assertions for a RAG-style response:
+# required facts must all be present, invented citations / internal
+# markers must be absent, and the answer must stay concise.
+#
+# Runs fully offline (no API key, no llm_judge):
+#   promptproof run examples/rag.yaml --mock
+
+name: rag-answer-checker
+
+model:
+  base_url: https://api.openai.com/v1
+  name: gpt-4o-mini
+  api_key_env: OPENAI_API_KEY
+  temperature: 0
+
+prompt: |
+  Answer the question using only the provided context. Cite facts from
+  the context. Do not invent sources, paper titles, or document IDs.
+  Keep the answer under 200 characters.
+
+  Context:
+  {{context}}
+
+  Question: {{question}}
+
+# Offline mock rules. First matching rule wins; default is a safe fallback.
+mock:
+  default: "I cannot answer from the provided context."
+  rules:
+    - match: "founded in 2012"
+      response: "Acme Corp was founded in 2012 by Jane Doe in Seattle."
+    - match: "Series B"
+      response: "Acme raised a $40M Series B in 2023 led by Example Ventures."
+
+cases:
+  - name: founding facts
+    vars:
+      context: "Acme Corp was founded in 2012 by Jane Doe in Seattle."
+      question: "When and where was Acme Corp founded, and by whom?"
+    assertions:
+      - contains_all: ["2012", "Jane Doe", "Seattle"]
+      - not_contains: "according to a 2015 paper"
+      - not_regex: "\\[\\d+\\]"          # no bracketed citation numbers
+      - max_chars: 200
+
+  - name: funding round
+    vars:
+      context: "In 2023 Acme raised a $40 million Series B round led by Example Ventures."
+      question: "What was the size of Acme's Series B and who led it?"
+    assertions:
+      - contains_all: ["$40M", "Series B", "Example Ventures"]
+      - not_contains: "https://arxiv.org"
+      - not_regex: "doc_id:\\s*\\d+"      # no invented document identifiers
+      - max_chars: 200
+
+  - name: insufficient context
+    vars:
+      context: "Acme Corp sells widgets."
+      question: "What is Acme's current market cap?"
+    mock_response: "The provided context does not contain market-cap information."
+    assertions:
+      - not_contains: "billion"
+      - not_regex: "\\$[0-9]+\\s*[BM]?"   # must not invent a dollar figure
+      - max_chars: 200
