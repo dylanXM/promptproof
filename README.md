@@ -199,6 +199,7 @@ example (`promptproof run examples/multiturn.yaml --mock`).
 | `max_chars`    | `max_chars: 500`                          | the response is at most N characters                     |
 | `min_chars`    | `min_chars: 50`                           | the response is at least N characters                    |
 | `equals`       | `equals: "yes"`                           | the response matches exactly (whitespace-trimmed)        |
+| `not_equals`   | `not_equals: "unknown"`                   | the response differs (whitespace-trimmed)                |
 | `starts_with`  | `starts_with: "Summary:"`                 | the response begins with the literal prefix              |
 | `ends_with`    | `ends_with: "done."`                      | the response ends with the literal suffix                |
 | `llm_judge`    | `llm_judge: "the response is polite"`     | a judge model decides the response meets the criterion  |

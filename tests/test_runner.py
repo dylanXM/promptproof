@@ -61,6 +61,34 @@ def test_json_suite_files_are_supported(tmp_path):
     assert report.ok
 
 
+def test_not_equals_from_yaml_suite(tmp_path):
+    suite_file = tmp_path / "not-equals.yaml"
+    suite_file.write_text(
+        """
+name: not-equals
+prompt: "Answer the question"
+cases:
+  - name: different answer
+    mock_response: "yes please"
+    assertions:
+      - not_equals: "yes"
+  - name: same answer
+    mock_response: " yes "
+    assertions:
+      - type: not_equals
+        value: "yes"
+""",
+        encoding="utf-8",
+    )
+    report = run_suite(load_suite(suite_file), mock=True)
+    assert report.passed_count == 1
+    assert report.failed_count == 1
+    assert not report.ok
+    assert [case.assertions[0].kind for case in report.cases] == [
+        "not_equals", "not_equals"
+    ]
+
+
 def test_mock_rule_regex_matching(tmp_path):
     suite_file = tmp_path / "suite.yaml"
     suite_file.write_text(

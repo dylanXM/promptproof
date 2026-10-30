@@ -12,8 +12,9 @@ A suite lists assertions as single-key mappings, e.g.::
       - json_schema: {type: object, required: [sentiment]}
       - llm_judge: "the response is polite and answers the question"
 
-``equals`` compares after stripping leading/trailing whitespace (models love
-trailing newlines); ``starts_with`` / ``ends_with`` match literally.
+``equals`` and ``not_equals`` compare after stripping leading/trailing
+whitespace (models love trailing newlines); ``starts_with`` / ``ends_with``
+match literally.
 
 ``not_regex`` is the mirror of ``regex``: it passes when the pattern does
 *not* match anywhere in the response — handy for banning PII shapes,
@@ -207,6 +208,14 @@ def _check_equals(response: str, expected: Any) -> AssertionResult:
     )
 
 
+def _check_not_equals(response: str, expected: Any) -> AssertionResult:
+    wanted = str(expected).strip()
+    ok = response.strip() != wanted
+    return AssertionResult(
+        "not_equals", ok, "" if ok else f"response equals forbidden {wanted!r}"
+    )
+
+
 def _check_starts_with(response: str, expected: Any) -> AssertionResult:
     prefix = str(expected)
     ok = response.startswith(prefix)
@@ -274,6 +283,7 @@ _CHECKS = {
     "max_chars": _check_max_chars,
     "min_chars": _check_min_chars,
     "equals": _check_equals,
+    "not_equals": _check_not_equals,
     "starts_with": _check_starts_with,
     "ends_with": _check_ends_with,
     "json_schema": _check_json_schema,
