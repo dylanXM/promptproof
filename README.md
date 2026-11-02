@@ -186,6 +186,14 @@ each turn's user message). `snapshot: true` and `--record` apply to the
 conversation's final reply. See `examples/multiturn.yaml` for a runnable
 example (`promptproof run examples/multiturn.yaml --mock`).
 
+### Retrieval-augmented answers (deterministic only)
+
+When the prompt is a RAG-style answer grounded in provided context, you can
+check the required facts, forbid invented citations, and enforce brevity
+with only deterministic assertions — no `llm_judge` needed. See
+`examples/rag.yaml` for a complete offline example
+(`promptproof run examples/rag.yaml --mock`).
+
 ## Assertions
 
 | Assertion      | Example                                   | Passes when…                                             |
