@@ -319,6 +319,14 @@ spending tokens or requiring secrets from forks.
 Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 Please keep the dependency footprint tiny and the offline demo working.
 
+## More from the maker
+
+PromptProof is built and maintained by Dylan XM as part of
+[SweetAI](https://hub.sweetai.work) — a small studio shipping developer
+tools and done-for-you services. The hub lists the other open-source
+tools (deepseek-scanner, litellm-check, QuotaTray) and the services
+built on the same testing discipline.
+
 ## License
 
 MIT © 2026 Dylan XM — see [LICENSE](LICENSE).
