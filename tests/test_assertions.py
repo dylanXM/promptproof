@@ -68,6 +68,39 @@ def test_equals():
     assert not only("yes please", {"equals": "yes"}).passed
 
 
+def test_not_equals():
+    result = only("yes please", {"not_equals": "yes"})
+    assert result.kind == "not_equals"
+    assert result.passed
+    assert result.detail == ""
+    result = only("yes", {"not_equals": "yes"})
+    assert not result.passed
+    assert "yes" in result.detail
+
+
+def test_not_equals_trims_both_sides():
+    assert not only(" \tyes\n", {"not_equals": " yes "}).passed
+    assert not only("\n", {"not_equals": ""}).passed
+    assert only("Yes", {"not_equals": "yes"}).passed
+
+
+def test_not_equals_explicit_form():
+    assert only("no", {"type": "not_equals", "value": "yes"}).passed
+    assert not only("42\n", {"type": "not_equals", "value": 42}).passed
+
+
+@pytest.mark.parametrize(
+    "assertion, message",
+    [
+        ({"type": "not_equals"}, "missing its 'value'"),
+        ({"not_equals": "yes", "contains": "no"}, "exactly one key"),
+    ],
+)
+def test_not_equals_malformed_config(assertion, message):
+    with pytest.raises(AssertionConfigError, match=message):
+        check_assertions("no", [assertion])
+
+
 def test_starts_with():
     assert only("Summary: great keyboard", {"starts_with": "Summary:"}).passed
     assert not only("In summary: great", {"starts_with": "Summary:"}).passed
