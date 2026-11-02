@@ -1,0 +1,59 @@
+# PromptProof example suite — repeat trials and a pass-rate gate.
+#
+# A single trial of a probabilistic prompt can pass by luck or fail by
+# noise. `repeat: N` runs each case N times; the case passes when the
+# fraction of passing trials reaches `min_pass_rate` (here 0.66 — at
+# least 2 of 3 trials). Both keys may be set at suite level (below) and
+# overridden per case (see the second case). With no `min_pass_rate`
+# anywhere, every trial must pass.
+#
+# Snapshots with repeats: in --record mode the first trial's response is
+# recorded as the golden and later trials diff against it.
+#
+# Runs fully offline (the mock answers deterministically, so every trial
+# passes and the pass rate is 1.00):
+#   promptproof run examples/repeat.yaml --mock
+
+name: repeat-demo
+
+repeat: 3
+min_pass_rate: 0.66
+
+model:
+  base_url: https://api.openai.com/v1
+  name: gpt-4o-mini
+  api_key_env: OPENAI_API_KEY
+  temperature: 0
+
+prompt: |
+  Classify the sentiment of the following product review as positive,
+  negative, or neutral. Respond with a JSON object only, for example
+  {"sentiment": "positive"}.
+
+  Review: {{review}}
+
+mock:
+  default: '{"sentiment": "neutral"}'
+  rules:
+    - match: "absolutely loved"
+      response: '{"sentiment": "positive"}'
+    - match: "broke after"
+      response: '{"sentiment": "negative"}'
+
+cases:
+  - name: glowing review
+    vars:
+      review: "I absolutely loved this keyboard — best purchase of the year."
+    assertions:
+      - contains: '"positive"'
+      - max_chars: 100
+
+  - name: angry review (strict override)
+    # Per-case overrides: more trials, and every one of them must pass.
+    repeat: 2
+    min_pass_rate: 1.0
+    vars:
+      review: "It broke after two days and support never replied."
+    assertions:
+      - contains: '"negative"'
+      - not_contains: '"positive"'

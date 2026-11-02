@@ -1,6 +1,8 @@
+import xml.etree.ElementTree as ET
+
 from promptproof import __version__
 from promptproof.assertions import AssertionResult
-from promptproof.report import render_html
+from promptproof.report import render_html, write_junit_report
 from promptproof.runner import CaseResult, RunReport
 
 
@@ -64,3 +66,61 @@ def test_html_shows_prompt_and_response():
     text = render_html(make_report())
     assert "Classify this" in text
     assert "positive" in text
+
+
+def test_junit_report_is_parseable_with_counts(tmp_path):
+    path = tmp_path / "junit.xml"
+    write_junit_report(make_report(), path)
+    root = ET.parse(path).getroot()
+    assert root.tag == "testsuites"
+    assert root.attrib["tests"] == "2"
+    assert root.attrib["failures"] == "1"
+    assert "time" in root.attrib
+    suite = root.find("testsuite")
+    assert suite.attrib["name"] == "demo-suite"
+    assert suite.attrib["tests"] == "2"
+    assert suite.attrib["failures"] == "1"
+    cases = suite.findall("testcase")
+    assert len(cases) == 2
+    assert all(c.attrib["classname"] == "demo-suite" for c in cases)
+    assert cases[0].attrib["name"] == "ok case"
+    assert cases[0].find("failure") is None
+
+
+def test_junit_failure_element_states_assertion_reason(tmp_path):
+    path = tmp_path / "junit.xml"
+    write_junit_report(make_report(), path)
+    cases = ET.parse(path).getroot().find("testsuite").findall("testcase")
+    failure = cases[1].find("failure")
+    assert failure is not None
+    assert "equals" in failure.attrib["message"]
+    assert "does not exactly equal" in failure.attrib["message"]
+
+
+def test_junit_failure_message_states_pass_rate(tmp_path):
+    report = RunReport(
+        suite_name="flaky-suite",
+        provider="stub",
+        model="stub",
+        cases=[
+            CaseResult(
+                name="flaky case",
+                passed=False,
+                duration_ms=3.0,
+                prompt="p",
+                response="r",
+                trials=3,
+                passed_trials=1,
+                min_pass_rate=0.66,
+            )
+        ],
+    )
+    path = tmp_path / "junit.xml"
+    write_junit_report(report, path)
+    failure = (
+        ET.parse(path).getroot().find("testsuite").find("testcase").find("failure")
+    )
+    assert failure is not None
+    assert "0.33" in failure.attrib["message"]
+    assert "0.66" in failure.attrib["message"]
+    assert "1/3" in failure.attrib["message"]

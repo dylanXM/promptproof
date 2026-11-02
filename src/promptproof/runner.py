@@ -31,6 +31,16 @@ class CaseResult:
     error: str = ""
     #: Per-turn results for multi-turn cases; empty for single-turn cases.
     turns: list["CaseResult"] = field(default_factory=list)
+    #: Repeat-trial summary: how many trials ran, how many passed, and the
+    #: effective pass-rate gate the case was judged against (1.0 = the
+    #: default "every trial must pass"). Single-trial cases report 1/1.
+    trials: int = 1
+    passed_trials: int = 0
+    min_pass_rate: float = 1.0
+
+    @property
+    def pass_rate(self) -> float:
+        return self.passed_trials / self.trials if self.trials else 0.0
 
     @property
     def total_tokens(self) -> int:
@@ -128,22 +138,117 @@ def run_suite(
     goldens: dict[str, str] = {} if record else load_goldens(snapshot_path(suite))
     recorded: dict[str, str] = {}
     for case in suite.cases:
-        started = time.perf_counter()
-        if case.turns:
-            result = _run_multi_turn(
-                case, suite, provider, judge, started, record=record, goldens=goldens
-            )
-        else:
-            result = _run_single_turn(
-                case, suite, provider, judge, started, record=record, goldens=goldens
-            )
+        result = _run_case_trials(
+            case, suite, provider, judge, record=record, goldens=goldens
+        )
         report.cases.append(result)
         if record:
+            # _run_case_trials puts the first trial's response in
+            # result.response in record mode, so this records trial 1.
             recorded[case.name] = result.response
     if record:
         save_goldens(snapshot_path(suite), recorded)
     _apply_budgets(report, suite)
     return report
+
+
+def _effective_repeat(suite: Suite, case: Case) -> int:
+    return case.repeat if case.repeat is not None else suite.repeat
+
+
+def _effective_min_pass_rate(suite: Suite, case: Case) -> float:
+    if case.min_pass_rate is not None:
+        return case.min_pass_rate
+    if suite.min_pass_rate is not None:
+        return suite.min_pass_rate
+    return 1.0
+
+
+def _run_case_trials(
+    case: Case,
+    suite: Suite,
+    provider: Provider,
+    judge: LLMJudge,
+    *,
+    record: bool,
+    goldens: dict[str, str],
+) -> CaseResult:
+    """Run *case* for its effective repeat count and aggregate the trials.
+
+    A trial passes iff all its assertions pass and it raised no error.
+    The case passes iff ``passed_trials / trials >= min_pass_rate`` (with
+    no gate configured anywhere, that is 1.0 — every trial must pass, the
+    pre-repeat behaviour). In ``--record`` mode trial 1 is recorded as
+    usual and later trials are run normally but diffed (snapshot check)
+    against trial 1's response instead of the golden file, so a drifting
+    repeat is caught at record time; the recorded golden is trial 1's
+    response. The aggregated result's prompt/response/assertions/turns
+    come from the last trial (first trial in record mode, whose response
+    is the golden), while token usage and duration are summed over all
+    trials.
+    """
+    repeat = _effective_repeat(suite, case)
+    min_pass_rate = _effective_min_pass_rate(suite, case)
+    run_one = _run_multi_turn if case.turns else _run_single_turn
+    trial_results: list[CaseResult] = []
+    first_response = ""
+    for trial_index in range(repeat):
+        if record and repeat > 1 and trial_index > 0:
+            result = run_one(
+                case,
+                suite,
+                provider,
+                judge,
+                time.perf_counter(),
+                record=False,
+                goldens=goldens,
+                snapshot_golden=first_response,
+            )
+        else:
+            result = run_one(
+                case,
+                suite,
+                provider,
+                judge,
+                time.perf_counter(),
+                record=record,
+                goldens=goldens,
+            )
+        if trial_index == 0:
+            first_response = result.response
+        trial_results.append(result)
+
+    passed_trials = sum(1 for t in trial_results if t.passed)
+    pass_rate = passed_trials / repeat if repeat else 0.0
+    passed = pass_rate >= min_pass_rate - 1e-9
+    first = trial_results[0]
+    last = trial_results[-1]
+    error = ""
+    for trial in trial_results:
+        if trial.error:
+            error = trial.error
+            break
+    if not error and not passed and repeat > 1:
+        error = (
+            f"pass rate {pass_rate:.2f} < required min_pass_rate "
+            f"{min_pass_rate:.2f} ({passed_trials}/{repeat} trials passed)"
+        )
+    return CaseResult(
+        name=case.name,
+        passed=passed,
+        duration_ms=sum(t.duration_ms for t in trial_results),
+        prompt=first.prompt,
+        response=first.response if record else last.response,
+        assertions=last.assertions,
+        prompt_tokens=sum(t.prompt_tokens for t in trial_results),
+        completion_tokens=sum(t.completion_tokens for t in trial_results),
+        usage_estimated=any(t.usage_estimated for t in trial_results),
+        error=error,
+        turns=last.turns,
+        trials=repeat,
+        passed_trials=passed_trials,
+        min_pass_rate=min_pass_rate,
+    )
 
 
 def _elapsed_ms(started: float) -> float:
@@ -159,8 +264,14 @@ def _run_single_turn(
     *,
     record: bool,
     goldens: dict[str, str],
+    snapshot_golden: str | None = None,
 ) -> CaseResult:
-    """Run a classic single-turn case."""
+    """Run a classic single-turn case.
+
+    ``snapshot_golden``, when given, replaces the golden-file lookup:
+    the response is diffed against it regardless of ``case.snapshot``
+    (used for repeat trials after the first in ``--record`` mode).
+    """
     prompt = render_template(suite.prompt, case.vars)
     try:
         completion = provider.complete(prompt, case_mock_response=case.mock_response)
@@ -185,7 +296,9 @@ def _run_single_turn(
             usage_estimated=completion.usage_estimated,
         )
     results = check_assertions(completion.text, case.assertions, judge=judge)
-    if case.snapshot:
+    if snapshot_golden is not None:
+        results.append(_check_snapshot(completion.text, snapshot_golden))
+    elif case.snapshot:
         golden = goldens.get(case.name)
         if golden is None:
             return CaseResult(
@@ -226,6 +339,7 @@ def _run_multi_turn(
     *,
     record: bool,
     goldens: dict[str, str],
+    snapshot_golden: str | None = None,
 ) -> CaseResult:
     """Run a multi-turn conversation case.
 
@@ -234,7 +348,8 @@ def _run_multi_turn(
     history, so the model sees the whole conversation. Assertions run per
     turn against that turn's reply; the case passes only if every turn
     passes. ``snapshot: true`` and ``--record`` apply to the conversation's
-    final reply.
+    final reply. ``snapshot_golden``, when given, replaces the golden-file
+    lookup for that final-reply diff (repeat trials in ``--record`` mode).
     """
     messages: list[dict[str, str]] = [{"role": "system", "content": suite.prompt}]
     transcript = [f"system:\n{suite.prompt}"]
@@ -281,7 +396,19 @@ def _run_multi_turn(
                 assertions=results,
             )
         turn_results.append(turn_result)
-    if not record and case.snapshot and not error:
+    if not error and snapshot_golden is not None:
+        if final_text != snapshot_golden:
+            turn_results.append(
+                CaseResult(
+                    name=f"{case.name} · snapshot",
+                    passed=False,
+                    duration_ms=0.0,
+                    prompt="",
+                    response=final_text,
+                    assertions=[_check_snapshot(final_text, snapshot_golden)],
+                )
+            )
+    elif not record and case.snapshot and not error:
         golden = goldens.get(case.name)
         if golden is None:
             error = (

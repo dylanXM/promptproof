@@ -1,9 +1,10 @@
-"""Console, JSON, and self-contained HTML reports for a suite run."""
+"""Console, JSON, JUnit XML, and self-contained HTML reports for a run."""
 
 from __future__ import annotations
 
 import html as html_lib
 import json
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,12 @@ def render_console(report: RunReport) -> str:
             f"{case.name:<{name_width}}  {status:<6}  "
             f"{case.duration_ms:>6.0f}ms  {case.total_tokens:>6}"
         )
+        if case.trials > 1:
+            lines.append(
+                f"    pass rate: {case.pass_rate:.2f} "
+                f"({case.passed_trials}/{case.trials} trials, "
+                f"required {case.min_pass_rate:.2f})"
+            )
         if case.error:
             lines.append(f"    error: {case.error}")
         for result in case.assertions:
@@ -85,6 +92,10 @@ def report_to_dict(report: RunReport) -> dict[str, Any]:
                 "prompt": case.prompt,
                 "response": case.response,
                 "error": case.error or None,
+                "trials": case.trials,
+                "passed_trials": case.passed_trials,
+                "pass_rate": round(case.pass_rate, 4),
+                "min_pass_rate": case.min_pass_rate,
                 "usage": {
                     "prompt_tokens": case.prompt_tokens,
                     "completion_tokens": case.completion_tokens,
@@ -125,6 +136,77 @@ def write_json_report(report: RunReport, path: str | Path) -> None:
         json.dumps(report_to_dict(report), indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+
+
+def _junit_failure_message(case: Any) -> str:
+    """Human-readable reason a case failed, for the JUnit <failure>."""
+    if case.trials > 1 and case.pass_rate < case.min_pass_rate:
+        return (
+            f"pass rate {case.pass_rate:.2f} < required min_pass_rate "
+            f"{case.min_pass_rate:.2f} "
+            f"({case.passed_trials}/{case.trials} trials passed)"
+        )
+    if case.error:
+        return case.error
+    failed = [
+        f"{r.kind}: {r.detail}" if r.detail else r.kind
+        for r in case.assertions
+        if not r.passed and not r.skipped
+    ]
+    for turn in case.turns:
+        if not turn.passed:
+            failed.extend(
+                f"{turn.name} — {r.kind}: {r.detail}" if r.detail else f"{turn.name} — {r.kind}"
+                for r in turn.assertions
+                if not r.passed and not r.skipped
+            )
+    if failed:
+        return "; ".join(failed)
+    return "case failed"
+
+
+def render_junit(report: RunReport) -> str:
+    """Render *report* as JUnit XML (one testcase per case)."""
+    total_seconds = sum(c.duration_ms for c in report.cases) / 1000
+    suites = ET.Element(
+        "testsuites",
+        {
+            "tests": str(len(report.cases)),
+            "failures": str(report.failed_count),
+            "time": f"{total_seconds:.3f}",
+        },
+    )
+    suite_el = ET.SubElement(
+        suites,
+        "testsuite",
+        {
+            "name": report.suite_name,
+            "tests": str(len(report.cases)),
+            "failures": str(report.failed_count),
+            "time": f"{total_seconds:.3f}",
+        },
+    )
+    for case in report.cases:
+        case_el = ET.SubElement(
+            suite_el,
+            "testcase",
+            {
+                "classname": report.suite_name,
+                "name": case.name,
+                "time": f"{case.duration_ms / 1000:.3f}",
+            },
+        )
+        if not case.passed:
+            message = _junit_failure_message(case)
+            failure = ET.SubElement(case_el, "failure", {"message": message})
+            failure.text = message
+    ET.indent(suites)
+    return ET.tostring(suites, encoding="unicode", xml_declaration=True)
+
+
+def write_junit_report(report: RunReport, path: str | Path) -> None:
+    """Write the JUnit XML report for *report* to *path*."""
+    Path(path).write_text(render_junit(report) + "\n", encoding="utf-8")
 
 
 _HTML_CSS = """

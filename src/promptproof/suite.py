@@ -82,6 +82,9 @@ class Case:
     assertions: list[Any] = field(default_factory=list)
     mock_response: str | None = None
     snapshot: bool = False
+    #: Repeat-trial overrides; None means "inherit the suite-level value".
+    repeat: int | None = None
+    min_pass_rate: float | None = None
     #: Multi-turn conversation turns. Each turn is a mapping with ``prompt``
     #: (required), ``assertions`` (optional, checked against that turn's
     #: reply) and ``mock_response`` (optional). Empty for single-turn cases.
@@ -97,6 +100,10 @@ class Suite:
     cases: list[Case] = field(default_factory=list)
     pricing: Pricing = field(default_factory=Pricing)
     limits: Limits = field(default_factory=Limits)
+    #: Repeat trials per case (default 1) and the pass-rate gate a case
+    #: must reach across its trials; None gate means "every trial must pass".
+    repeat: int = 1
+    min_pass_rate: float | None = None
     #: Path to the golden file for snapshot cases; defaults to
     #: ``<suite-stem>.golden.json`` next to the suite file when None.
     snapshot_file: str | None = None
@@ -116,6 +123,27 @@ def _load_raw(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise PromptProofError(f"suite file {path} must contain a mapping at the top level")
     return data
+
+
+def _validate_repeat(value: Any, ref: str) -> int | None:
+    """Validate a ``repeat`` value; None (absent) passes through."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise PromptProofError(f"{ref}: 'repeat' must be an integer >= 1")
+    return value
+
+
+def _validate_min_pass_rate(value: Any, ref: str) -> float | None:
+    """Validate a ``min_pass_rate`` value; None (absent) passes through."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise PromptProofError(f"{ref}: 'min_pass_rate' must be a number in [0, 1]")
+    rate = float(value)
+    if not 0.0 <= rate <= 1.0:
+        raise PromptProofError(f"{ref}: 'min_pass_rate' must be a number in [0, 1]")
+    return rate
 
 
 def _load_turns(raw_turns: Any, index: int, suite_path: Path) -> list[dict[str, Any]]:
@@ -184,6 +212,10 @@ def load_suite(path: str | Path) -> Suite:
         ),
         max_usd=float(limits_raw["max_usd"]) if "max_usd" in limits_raw else None,
     )
+    suite_repeat = _validate_repeat(raw.get("repeat"), f"suite {suite_path}")
+    suite_min_pass_rate = _validate_min_pass_rate(
+        raw.get("min_pass_rate"), f"suite {suite_path}"
+    )
 
     cases: list[Case] = []
     for index, raw_case in enumerate(raw_cases):
@@ -196,6 +228,7 @@ def load_suite(path: str | Path) -> Suite:
                 "'turns' and case-level 'assertions' cannot be combined — "
                 "put assertions on the individual turns"
             )
+        case_ref = f"case #{index + 1} in {suite_path}"
         cases.append(
             Case(
                 name=str(raw_case.get("name", f"case-{index + 1}")),
@@ -206,6 +239,10 @@ def load_suite(path: str | Path) -> Suite:
                 ),
                 snapshot=bool(raw_case.get("snapshot", False)),
                 turns=turns,
+                repeat=_validate_repeat(raw_case.get("repeat"), case_ref),
+                min_pass_rate=_validate_min_pass_rate(
+                    raw_case.get("min_pass_rate"), case_ref
+                ),
             )
         )
 
@@ -217,6 +254,8 @@ def load_suite(path: str | Path) -> Suite:
         cases=cases,
         pricing=pricing,
         limits=limits,
+        repeat=suite_repeat if suite_repeat is not None else 1,
+        min_pass_rate=suite_min_pass_rate,
         snapshot_file=(
             str(raw["snapshot_file"]) if "snapshot_file" in raw else None
         ),

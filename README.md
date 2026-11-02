@@ -103,6 +103,41 @@ estimated cost: $0.0131 (estimated)
 BUDGET EXCEEDED: token budget exceeded: 66 tokens > max_tokens 50
 ```
 
+### Repeat trials & pass-rate gates
+
+One trial of a probabilistic prompt can pass by luck. Run each case
+several times and judge it on the fraction of trials that pass:
+
+```yaml
+repeat: 3               # suite level: run every case 3 times
+min_pass_rate: 0.66     # case passes when >= 66% of its trials pass
+
+cases:
+  - name: flaky classifier
+    repeat: 5           # per-case overrides, either key
+    min_pass_rate: 0.8
+    assertions: [...]
+```
+
+A trial passes when all its assertions pass and nothing errors;
+`pass_rate = passed_trials / repeat`, and the case passes when the rate
+reaches the effective `min_pass_rate`. With no `min_pass_rate` anywhere,
+every trial must pass. `repeat` must be an integer ≥ 1 and
+`min_pass_rate` a number in [0, 1] — anything else is a suite error
+(exit `2`). Token usage and cost aggregate across all trials; the
+console shows the rate for repeated cases and the JSON report records
+`trials`, `passed_trials`, `pass_rate`, and `min_pass_rate` per case.
+With snapshots, `--record` records the *first* trial's response as the
+golden and later trials diff against it. See `examples/repeat.yaml`.
+
+For CI systems that speak JUnit, `--junit report.xml` writes a JUnit XML
+report (one `<testcase>` per case, failed cases carry a `<failure>` with
+the reason) alongside the console/JSON/HTML reports:
+
+```console
+$ promptproof run examples/basic.yaml --mock --junit report.xml
+```
+
 ### Golden-file snapshots
 
 For the drift that patterns can't catch, mark a case with `snapshot: true`
@@ -275,6 +310,9 @@ spending tokens or requiring secrets from forks.
 - ~~Cost budgets per suite (`max_tokens` / `max_usd` gates)~~ — done:
   suite-level `pricing` + `limits` gates, cost estimate in every report
 - ~~HTML report output~~ — done: `promptproof run suite.yaml --html report.html`
+- ~~Repeat trials & pass-rate gates~~ — done: suite/case-level `repeat` +
+  `min_pass_rate` (see `examples/repeat.yaml`)
+- ~~JUnit XML report~~ — done: `promptproof run suite.yaml --junit report.xml`
 
 ## Contributing
 

@@ -4,7 +4,7 @@ Usage::
 
     promptproof run suite.yaml            # real endpoint (needs API key)
     promptproof run suite.yaml --mock     # offline demo, no key needed
-    promptproof run suite.yaml --json report.json --html report.html
+    promptproof run suite.yaml --json report.json --html report.html --junit report.xml
     promptproof --version
 
 Exit codes: 0 = every case passed, 1 = at least one case failed,
@@ -19,7 +19,7 @@ from collections.abc import Sequence
 
 from . import __version__
 from .errors import PromptProofError
-from .report import render_console, write_html_report, write_json_report
+from .report import render_console, write_html_report, write_json_report, write_junit_report
 from .runner import run_suite
 from .suite import load_suite
 
@@ -50,6 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         default=None,
         help="also write a self-contained HTML report to PATH",
+    )
+    run.add_argument(
+        "--junit",
+        metavar="PATH",
+        default=None,
+        help="also write a JUnit XML report to PATH",
     )
     run.add_argument(
         "--record",
@@ -90,6 +96,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.html:
         write_html_report(report, args.html)
         print(f"HTML report written to {args.html}")
+    if args.junit:
+        write_junit_report(report, args.junit)
+        print(f"JUnit report written to {args.junit}")
     return 0 if report.ok else 1
 
 
