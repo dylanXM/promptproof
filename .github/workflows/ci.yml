@@ -32,3 +32,24 @@ jobs:
           promptproof run examples/headlines.yaml --mock
           promptproof run examples/budgets.yaml --mock || true   # tiny budget: gate is *meant* to fire
           promptproof run examples/snapshots.yaml --mock        # diffs against the committed golden file
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Offline demo suite (mock provider)
+        run: |
+          promptproof --version
+          promptproof run examples/basic.yaml --mock

@@ -325,7 +325,10 @@ PromptProof is built and maintained by Dylan XM as part of
 [SweetAI](https://hub.sweetai.work) — a small studio shipping developer
 tools and done-for-you services. The hub lists the other open-source
 tools (deepseek-scanner, litellm-check, QuotaTray) and the services
-built on the same testing discipline.
+built on the same testing discipline. Sibling project:
+[Prompt Outcomes](https://prompts.sweetai.work) — a library of
+production-ready prompts with the finished outputs they produce; test
+the ones you rely on with PromptProof.
 
 ## License
 

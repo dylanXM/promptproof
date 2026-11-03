@@ -13,7 +13,7 @@ def test_version_flag(capsys):
     with pytest.raises(SystemExit) as excinfo:
         main(["--version"])
     assert excinfo.value.code == 0
-    assert __version__ in capsys.readouterr().out
+    assert capsys.readouterr().out.strip() == f"promptproof {__version__}"
 
 
 def test_run_mock_example_exits_zero(capsys):
